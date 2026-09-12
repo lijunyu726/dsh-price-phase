@@ -18,6 +18,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "LICENSE",
     "lib",
     "test",
     "cordis.patch.yml",
