@@ -54,15 +54,20 @@ Restart DSH (or let the profile reload). The badge appears centred in the compos
 ## Development
 
 ```sh
-npm run check    # syntax preflight for all three entry points
-npm test         # 21 tests: pure logic + bundle contract
-npm run verify   # both
+npm run build:bundle   # regenerate the bundle's inlined logic from lib/price-phase.js
+npm run check          # syntax preflight + verify the inlined region matches the source
+npm test               # 23 tests: pure logic + bundle contract
+npm run verify         # all of the above
 ```
+
+The decision logic inside `lib/client.js` is not hand-written: `scripts/inline-price-phase.mjs` inlines it from `lib/price-phase.js` at build time. DSH's bundle resolver only knows platform seed words and registered package ids, so requiring the package's own subpath always fails — and the logic cannot simply be hand-written into the bundle either, since then it could not be unit-tested in Node. Re-run `build:bundle` after editing `lib/price-phase.js`.
 
 Tests come in two layers:
 
 - `test/price-phase.test.js` — phase decisions, day and weekend boundaries, countdown landing points. Timestamps are built as `Date.UTC(y, m, d, H-8, M)` (Beijing = UTC+8), and expectations are transcribed from the official pricing footnote rather than copied out of the implementation.
-- `test/client-contract.test.js` — builds a minimal browser environment in `node:vm`, actually executes `lib/client.js`, and checks that the `__ModuleLoader__.load({ id })` id matches the package name, that `factory` only requires declared modules, that `apply` registers into the right slot, and that style injection is idempotent. These packaging mistakes surface on the host side only as `loaded without registering`, so they are invisible without executing the bundle.
+- `test/client-contract.test.js` — builds a minimal browser environment in `node:vm`, actually executes `lib/client.js`, and checks that the id matches the package name, that it **only requests platform seed words**, that it **never requires its own subpaths**, that every inlined symbol is present, that `apply` registers into the right slot, and that style injection is idempotent.
+
+  This layer is not optional. Bundle packaging mistakes surface on the host side only as `loaded without registering`, or as a single `missed the module table` line in the browser console — syntax checks like `node --check` cannot see them at all. The first release of this plugin shipped exactly such a bug, and this test is what now covers it.
 
 ## Known limits
 

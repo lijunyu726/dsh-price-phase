@@ -54,15 +54,20 @@ npm install dsh-price-phase
 ## 开发
 
 ```sh
-npm run check    # 三个入口文件的语法预检
-npm test         # 21 项测试：纯逻辑 + bundle 契约
-npm run verify   # 两者都跑
+npm run build:bundle   # 由 lib/price-phase.js 重新生成 bundle 的内联段
+npm run check          # 语法预检 + 校验内联段与源文件一致
+npm test               # 23 项测试：纯逻辑 + bundle 契约
+npm run verify         # 以上全部
 ```
+
+`lib/client.js` 里的判定逻辑不是手写的，而是由 `scripts/inline-price-phase.mjs` 从 `lib/price-phase.js` **构建期内联**进去的。原因是 DSH 的 bundle 解析器只认平台 seed 字面量与已注册的包 id，`require` 自身子路径必定失败；而逻辑又不能直接手写在 bundle 里，否则无法在 Node 下单测。改动 `lib/price-phase.js` 后需重跑 `build:bundle`。
 
 测试分两层：
 
 - `test/price-phase.test.js` —— 分时判定、跨日与跨周末边界、倒计时落点。时间戳按 `Date.UTC(y, m, d, H-8, M)` 构造（北京 = UTC+8），期望值照官方脚注逐条翻译，不是从实现里反抄的。
-- `test/client-contract.test.js` —— 在 `node:vm` 里造一个最小浏览器环境，真正执行 `lib/client.js`，验证 `__ModuleLoader__.load({ id })` 的 id 与包名一致、`factory` 只 require 已声明的模块、`apply` 把徽标注册进正确的槽位、样式注入幂等。这类打包错误在宿主侧只表现为「loaded without registering」，不跑一遍是看不出来的。
+- `test/client-contract.test.js` —— 在 `node:vm` 里造一个最小浏览器环境，真正执行 `lib/client.js`，验证 id 与包名一致、**只请求平台 seed 字面量**、**不请求自身子路径**、内联符号齐全、槽位注册正确、样式注入幂等。
+
+  这一层是必需的：bundle 的打包错误在宿主侧只表现为「loaded without registering」或浏览器控制台里一句 `missed the module table`，`node --check` 这类语法检查**完全抓不到**。本插件第一版就因为在 bundle 里 `require` 自身子路径而带着这个 bug 发布过，正是这条测试补上了它。
 
 ## 已知边界
 

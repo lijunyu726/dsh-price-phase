@@ -16,10 +16,6 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 
-// 通过包自身的 exports 映射导入（"./price-phase"），顺带验证该子路径真的存在。
-// 真实宿主就是这么解析 bundle 里的 require('dsh-price-phase/price-phase') 的。
-import * as pricePhase from 'dsh-price-phase/price-phase'
-
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '..')
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
@@ -73,6 +69,27 @@ function fakeDom() {
  * 在沙箱里加载 bundle，返回模块 exports、DOM 替身与模块加载记录。
  * @returns 一次加载的全部可观测结果。
  */
+/**
+ * 模拟宿主 bundle 解析器（dsh-client-modules/lib/client.js:296-310）：
+ * 只有平台 seed 字面量、已物化的包、已注册的 factory 三條路，其余一律抛错。
+ *
+ * 这里**刻意不给本包子路径开后门**——早先的版本为了让
+ * `require('dsh-price-phase/price-phase')` 通过而在测试里注入 Node 版解析，
+ * 结果把「bundle 在真实浏览器里必然抛 missed the module table」这个 bug
+ * 掩盖了整个发布周期。测试必须比真实环境更严格，不能更宽松。
+ */
+const PLATFORM_SEEDS = [
+  'react',
+  'react/jsx-runtime',
+  'react-dom',
+  'react-dom/client',
+  '@deepseek-ai/cordis',
+  'dsh-client-store',
+  'dsh-client-ui-slots',
+  'dsh-client-ui-primitives',
+  'dsh-client-ui-dockkit',
+]
+
 function loadBundle() {
   const { calls, react } = fakeReact()
   const dom = fakeDom()
@@ -81,10 +98,12 @@ function loadBundle() {
   const hostRequire = (id) => {
     required.push(id)
     if (id === 'react') return react
-    // 宿主对包内子路径的解析结果；用与 bundle 相同的模块实例，避免测试
-    // 自己抄一份逻辑。
-    if (id === 'dsh-price-phase/price-phase') return pricePhase
-    throw new Error(`bundle 请求了未声明的模块：${id}`)
+    if (PLATFORM_SEEDS.includes(id)) return {}
+    // 复刻宿主的真实报错形状，让契约违反一眼可辨。
+    throw new Error(
+      `client-modules: require("${id}") missed the module table — ` +
+        'not a platform seed word, not a materialized module, and no registered package factory',
+    )
   }
   const sandbox = {
     window: Object.assign(dom.window, {
@@ -127,15 +146,36 @@ test('factory 返回 apply / inject，且 inject 声明 slots 服务', () => {
   assert.equal(module.name, pkg.name)
 })
 
-test('factory 只 require 已声明的依赖', () => {
+test('bundle 自包含：运行时只请求平台 seed 字面量', () => {
   const harness = loadBundle()
   loadModule(harness)
   const { required } = harness
+  assert.ok(required.length > 0, 'factory 应当至少 require 了 react')
   for (const id of required) {
     assert.ok(
-      id === 'react' || id === pkg.name || id.startsWith(`${pkg.name}/`),
-      `未声明的依赖：${id}`,
+      PLATFORM_SEEDS.includes(id),
+      `bundle 请求了非 seed 模块 "${id}"；宿主解析器只认平台 seed 与已注册的包 id，` +
+        '自身子路径（如 dsh-price-phase/price-phase）必然抛 missed the module table',
     )
+  }
+})
+
+test('bundle 不请求本包的任何子路径（回归：曾用 require 引自身子路径）', () => {
+  const harness = loadBundle()
+  loadModule(harness)
+  const offenders = harness.required.filter((id) => id.startsWith(`${pkg.name}/`))
+  assert.deepEqual(
+    offenders,
+    [],
+    `bundle 不得 require 自身子路径：${offenders.join(', ')}。` +
+      '该子路径在浏览器里永远无法解析，逻辑应由 scripts/inline-price-phase.mjs 内联。',
+  )
+})
+
+test('内联段确实包含全部核心逻辑', () => {
+  // 逻辑被内联进 bundle 后，若源文件新增导出却忘了重新生成，这里会失败。
+  for (const symbol of ['PEAK_WINDOWS_MIN', 'PEAK_WEEKDAYS', 'pricePhase', 'beijingClock', 'msUntilNextChange', 'describePhase', 'formatCountdown']) {
+    assert.ok(bundle.includes(symbol), `bundle 缺少内联符号 ${symbol}，请运行 npm run build:bundle`)
   }
 })
 

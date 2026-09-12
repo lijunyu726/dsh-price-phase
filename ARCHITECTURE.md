@@ -41,13 +41,53 @@ DSH Web GUI（浏览器）
 2. `PricePhaseBadge()` 组件：`useState` 持有当前时间戳，`useEffect` 起 30 秒定时器与窄屏媒体查询监听
 3. `apply(ctx)` 把组件注册进槽位
 
-判定、格式化、文案全部委托给 `lib/price-phase.js`。**这一层不含业务逻辑**，因为它无法在 Node 下测试。
+判定、格式化、文案全部来自标记区里内联的 `lib/price-phase.js`。**这一层不含手写业务逻辑**，因为它无法在 Node 下测试。
+
+### `scripts/inline-price-phase.mjs` —— 构建期内联
+
+把 `lib/price-phase.js` 的代码（去掉 `export` 关键字）替换进 `lib/client.js` 的标记区：
+
+```
+    // #region 内联自 lib/price-phase.js（由 scripts/inline-price-phase.mjs 生成，勿手改）
+    … 「const PEAK_WINDOWS_MIN = …」到「function describePhase(…) {…}」逐字内联 …
+    // #endregion 内联自 lib/price-phase.js
+```
+
+为什么必须内联、而不能 `require` 进来——见下面「为什么 bundle 必须自包含」。
 
 ### `lib/index.js` —— 宿主半边
 
 空插件。存在的原因是 DSH 的包清单按 `dsh.client.platform` 查找客户端半边，宿主半边缺失会让加载器解析失败。
 
 ## 关键设计决策
+
+### 为什么 bundle 必须自包含（本仓库踩过的坑）
+
+DSH 的浏览器 bundle 解析器（`@deepseek-ai/dsh-client-modules`）只有三条路：
+
+```js
+makeRequire(edges) {
+  return (spec) => {
+    if (this.seed.has(spec)) return this.seed.get(spec)        // 平台 seed 字面量
+    const id = stripClientSuffix(spec)
+    const record = this.loadCache.get(id)                       // 已物化的包，键 = 包 id
+    if (record !== undefined) return record.exports
+    if (this.factories.has(id)) return this.materialize(id).exports  // 已注册的 factory，键 = 包 id
+    throw new Error(`client-modules: require("${spec}") missed the module table …`)
+  }
+}
+```
+
+`loadCache` 与 `factories` **都以包 id 为键**。因此 `require('dsh-price-phase/price-phase')` 这类**自身子路径**永远命中不了，在真实浏览器里必然抛错。
+
+第一版正是这么写的，而且带病发布：
+
+- `node --check` 只看语法，抓不到；
+- 当时的契约测试为了让这条 require 通过，**在测试里注入了 Node 版解析当后门**，把 bug 掩盖了整个发布周期。
+
+修法不是把逻辑手写进 bundle（那样就无法在 Node 下单测），而是**构建期内联**：`lib/price-phase.js` 仍是唯一真源，`scripts/inline-price-phase.mjs` 在构建时把同一份代码去掉 `export` 后写入标记区。测试也改成只放行平台 seed 字面量、并复刻宿主的报错形状。
+
+**结论：测试必须比真实宿主更严格，绝不能为了「让它跑通」而放宽。**
 
 ### 为什么用 UTC+8 位移而不是本地时区
 
@@ -94,7 +134,9 @@ if (pricePhase(candidate) !== pricePhase(candidate - 1)) return candidate - t
 
 **运行时零依赖。** bundle 只 `require('react')`，由宿主提供（与所有官方客户端插件一致）。
 
-`lib/client.js` 里 `require('dsh-price-phase/price-phase')` 走 `package.json` 的 `exports` 映射解析，因此安装后必须保持 `exports` 中 `./price-phase` 这条映射存在——删掉它会让 bundle 在浏览器里加载失败。
+`lib/client.js` 只 `require('react')`，由宿主提供（与所有官方客户端插件一致）。bundle 内不再有任何跨模块 require——判定逻辑由构建期内联进来（见上）。
+
+`package.json` 的 `exports` 里保留 `./price-phase` 映射，是给**外部 Node 消费者**用的（例如想在宿主侧复用同一套判定）。仓库内的测试用的是相对路径导入（`../lib/price-phase.js`），因此这条映射**当前没有测试覆盖**——改动它不会让测试失败，这是已知的覆盖缺口。
 
 ## 已知边界与未实现
 
@@ -105,5 +147,7 @@ if (pricePhase(candidate) !== pricePhase(candidate - 1)) return candidate - t
 | 24 小时时段轴 / 详情弹窗 | 未实现，刻意不做（本插件定位是「只做一件事」） |
 | 点击交互 | 未实现，只有悬停说明 |
 | 宿主侧服务 / RPC | 无。本插件不接触凭据、不发网络请求 |
+| `exports["./price-phase"]` 的可用性 | 无测试覆盖（仓库内用相对路径导入）；外部消费者依赖它 |
+| 上游解析器行为变更 | 内联方案不依赖解析器细节，比 require 子路径更耐久；但 `dsh-client-modules` 若改变 bundle 形态仍需复核 |
 | DSH 版本兼容性 | 只验证过 0.1.5 的 `conversation.input.right` 契约 |
 | 深浅色主题 | 复用 DSH 主题色值，未单独适配 |

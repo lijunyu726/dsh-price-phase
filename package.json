@@ -25,13 +25,16 @@
     "README.md",
     "README.en.md",
     "AGENTS.md",
-    "ARCHITECTURE.md"
+    "ARCHITECTURE.md",
+    "scripts"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/price-phase.js",
+    "build:bundle": "node scripts/inline-price-phase.mjs",
+    "check:bundle": "node scripts/inline-price-phase.mjs --check",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/price-phase.js && npm run check:bundle",
     "test": "node --test \"test/*.test.js\"",
     "verify": "npm run check && npm test",
     "prepublishOnly": "npm run verify"

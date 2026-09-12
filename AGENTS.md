@@ -23,11 +23,17 @@
 
 1. **`lib/client.js` 不是一个普通 ES 模块。** 它由宿主当普通脚本加载，必须自行调用 `window.__ModuleLoader__.load(...)`。漏掉这个调用，宿主报的是 `loaded without registering`，而**不会**抛语法错误——很容易误判成「加载成功但没效果」。
 2. **`__ModuleLoader__.load` 的 `id` 必须与 `package.json` 的 `name` 逐字一致。**
-3. **bundle 里 `require` 的每个模块都必须能被宿主解析。** 本包只允许 `react` 与 `dsh-price-phase/*`；后者走 `package.json` 的 `exports` 映射。新增跨包依赖前先确认宿主环境里存在该包。
-4. **不要把判定逻辑写进 `lib/client.js`。** 纯逻辑一律放 `lib/price-phase.js`，bundle 只做 DOM 与槽位接线。bundle 里的代码在 Node 下跑不了，写进去就无法测试。
-5. **不要引入第三方运行时依赖。** 本插件的卖点之一是零依赖、离线可用。任何新增依赖都视为破坏性变更，需在 README 中说明理由。
-6. **不要把价格数值硬编码进代码。** 只提示时段。单价会变，硬编码必然过期。
-7. **北京时间（UTC+8）是规则的一部分，不是实现细节。** 不要改成读本地时区——海外用户会算错。UTC+8 无夏令时，直接对时间戳做 +8h 位移读 UTC 字段即可。
+3. **bundle 必须自包含。** 宿主解析器（`dsh-client-modules/lib/client.js:296-310`）只有三条路：平台 seed 字面量、已物化的包、已注册的 factory——**后两者都以包 id 为键**。因此：
+
+   - 允许 `require('react')`（以及 `react/jsx-runtime`、`react-dom`、`@deepseek-ai/cordis`、`dsh-client-*` 这几个 seed 字面量）。
+   - **绝不允许 `require('dsh-price-phase/...')`** ——自身子路径永远不会被注册成包 id，在真实浏览器里必然抛 `missed the module table`。
+
+   本仓库第一版正是踩了这个坑，而且 `node --check` 与当时的合约测试**都抓不到**（前者只看语法，后者注入了 Node 版 require 当后门）。现在测试改为只放行 seed 字面量并模拟宿主报错，回归由 `test/client-contract.test.js` 的两条用例守住。
+4. **不要把判定逻辑手写进 `lib/client.js`。** 纯逻辑一律放 `lib/price-phase.js`——bundle 里的代码在 Node 下跑不了，手写进去就无法测试。逻辑通过**构建期内联**进入 bundle：`npm run build:bundle` 会读 `lib/price-phase.js`、去掉 `export` 关键字、替换 bundle 中的标记区。真源始终是那一份可单测的文件。
+5. **改动 `lib/price-phase.js` 后必须重新生成 bundle**，否则 `npm run check` 会在 `check:bundle` 这一步失败（它会逐字比对标记区与源文件）。`prepublishOnly` 已包含这条，发布前不可能漏。
+6. **不要引入第三方运行时依赖。** 本插件的卖点之一是零依赖、离线可用。任何新增依赖都视为破坏性变更，需在 README 中说明理由。
+7. **不要把价格数值硬编码进代码。** 只提示时段。单价会变，硬编码必然过期。
+8. **北京时间（UTC+8）是规则的一部分，不是实现细节。** 不要改成读本地时区——海外用户会算错。UTC+8 无夏令时，直接对时间戳做 +8h 位移读 UTC 字段即可。
 
 ## 验证方式
 
@@ -37,15 +43,16 @@
 npm run verify   # = npm run check && npm test
 ```
 
-- `npm run check`：三个入口文件的 `node --check` 语法预检。
-- `npm test`：21 项测试，两层。
+- `npm run check`：三个入口文件的 `node --check` 语法预检，外加 `check:bundle`（内联段与源文件逐字一致）。
+- `npm test`：23 项测试，两层。
   - **纯逻辑层**：分时判定、跨日边界、跨周末倒计时。时间戳用 `Date.UTC(y, m, d, H-8, M)` 构造。
-  - **bundle 契约层**：在 `node:vm` 里造最小浏览器环境真正执行 `lib/client.js`，检查 id 一致、依赖已声明、槽位注册正确、样式注入幂等。
+  - **bundle 契约层**：在 `node:vm` 里造最小浏览器环境真正执行 `lib/client.js`，检查 id 一致、**只请求平台 seed**、**不请求自身子路径**、内联符号齐全、槽位注册正确、样式注入幂等。
 
 两条要求：
 
 - **期望值必须来自官方定价页脚注，不能从实现里反抄。** 从实现反抄等于把 bug 固化成期望。
-- **新增边界行为时，同时加一条「落点确实翻转状态」这类不变量测试。** 本仓库已有两条这样的测试抓出过真 bug（周末误报、午夜假切换点），它们是这套测试里最有价值的部分。
+- **测试必须比真实宿主更严格，不能更宽松。** 早期版本为了让子路径 require 通过而在测试里注入 Node 版解析，结果把「浏览器里必然抛错」这个 bug 掩盖了整个发布周期。凡是「为了让它跑通」而放宽测试的想法，都要先怀疑是不是产品写错了。
+- **新增边界行为时，同时加一条不变量测试**（如「倒计时落点必须翻转状态」）。本仓库已有三条这样的测试抓出过真 bug（周末误报、午夜假切换点、bundle 自包含），它们是这套测试里最有价值的部分。
 
 发布前：`npm run verify` 必须全绿，且 `npm pack --dry-run` 的文件清单符合预期。
 
