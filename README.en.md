@@ -38,10 +38,12 @@ Every decision comes from the browser's local clock converted to UTC+8, so it wo
 ## Install
 
 ```sh
-npm install dsh-price-phase
+dsh plugin --profile web add dsh-price-phase
 ```
 
-Then add one entry to your DSH profile patch layer (for example `~/.dsh/profiles/web/cordis.patch.yml`):
+Restart DSH and the badge appears centred in the composer's bottom tool row.
+
+`dsh plugin add` reads the `dsh.bundle.patch` field in this package's `package.json` and inserts the plugin into the profile tree for you. **No manual edit of `cordis.patch.yml` is needed.** The entry it writes is shown below, for troubleshooting only:
 
 ```yaml
 - insert:
@@ -49,7 +51,11 @@ Then add one entry to your DSH profile patch layer (for example `~/.dsh/profiles
       name: 'dsh-price-phase'
 ```
 
-Restart DSH (or let the profile reload). The badge appears centred in the composer's bottom tool row.
+Installing through npm directly also works (for a hand-rolled profile, or offline distribution), but then you do add that entry yourself:
+
+```sh
+npm install dsh-price-phase
+```
 
 ## Development
 

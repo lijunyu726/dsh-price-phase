@@ -38,10 +38,12 @@
 ## 安装
 
 ```sh
-npm install dsh-price-phase
+dsh plugin --profile web add dsh-price-phase
 ```
 
-然后在 DSH 的 profile 补丁层（例如 `~/.dsh/profiles/web/cordis.patch.yml`）里加一条：
+重启 DSH 后，输入卡底部工具行中央就会出现时段徽标。
+
+`dsh plugin add` 会读取本包 `package.json` 里的 `dsh.bundle.patch`，**自动**把插件插进配置树，不需要手工编辑 `cordis.patch.yml`。下面是它替你做的事，仅供排查时参考：
 
 ```yaml
 - insert:
@@ -49,7 +51,11 @@ npm install dsh-price-phase
       name: 'dsh-price-phase'
 ```
 
-重启 DSH（或让 profile 重新加载）后，输入卡底部工具行中央就会出现时段徽标。
+也可以用 npm 直接装（例如自建 profile 或离线分发），但要自己补上面那条 insert：
+
+```sh
+npm install dsh-price-phase
+```
 
 ## 开发
 
