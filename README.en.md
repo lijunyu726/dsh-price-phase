@@ -6,6 +6,8 @@ English | [中文](./README.md)
 
 > Based on DeepSeek's official time-of-day pricing: **peak hours are Monday–Friday 09:00–12:00 and 14:00–18:00 Beijing time**. Every other moment — including **all of Saturday and Sunday** — is off-peak, priced at half the peak rate.
 
+![The phase badge, centred in the DSH Web GUI composer's bottom tool row; this capture reads "off-peak"](./docs/badge-off-peak.png)
+
 ---
 
 ## What this plugin deliberately does not do
