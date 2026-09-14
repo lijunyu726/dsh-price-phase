@@ -8,12 +8,6 @@ English | [中文](./README.md)
 
 ---
 
-## Why this exists
-
-It started as a bug. The author's own implementation compared only hours and minutes and forgot to check the day of week, so **every weekend reported "peak" during 09:00–12:00 and 14:00–18:00** — users would believe they were paying full price while off-peak rates actually applied.
-
-It was extracted into its own package because that particular rule is easy to miss, and missing it costs **six hours of wrong status every weekend**.
-
 ## What this plugin deliberately does not do
 
 Several peak-hour indicators already exist. This one is scoped to **do one thing**:
